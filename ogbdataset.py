@@ -11,7 +11,11 @@ def randomsplit(dataset, val_ratio: float=0.10, test_ratio: float=0.2):
     data = dataset[0]
     data.edge_index, _ = coalesce(data.edge_index, None, num_nodes=data.num_nodes)
     data.edge_index, _ = remove_self_loops(data.edge_index)
-    data.num_nodes = data.x.shape[0]
+    if not hasattr(data, 'x'):
+        data.num_nodes = data.x.shape[0]
+    else:
+        data.num_nodes = data.num_nodes
+
     transform = T.Compose([
         T.NormalizeFeatures(),
         RandomLinkSplit(is_undirected=True, num_val=val_ratio, num_test=test_ratio,add_negative_train_samples=True, split_labels=True)])
@@ -33,7 +37,7 @@ def loaddataset(name: str, use_valedges_as_input: bool, load=None):
         data.num_nodes = data.x.shape[0]
     else:
         dataset = PygLinkPropPredDataset(name=f'ogbl-{name}')
-        splits = dataset.get_edge_split()
+        splits = randomsplit(dataset)
         data = dataset[0]
         edge_index = data.edge_index
     data.edge_weight = None
@@ -53,9 +57,4 @@ def loaddataset(name: str, use_valedges_as_input: bool, load=None):
     return data, splits
 
 if __name__ == "__main__":
-    loaddataset("Cora", False)
-    loaddataset("Citeseer", False)
-    loaddataset("Pubmed", False)
-    loaddataset("ppa", False)
-    loaddataset("collab", False)
     loaddataset("ddi", False)

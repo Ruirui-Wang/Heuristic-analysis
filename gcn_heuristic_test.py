@@ -169,7 +169,7 @@ def save_to_csv(file_path, model_name, heuristic, test_loss):
 def parseargs():
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=1000, help="number of epochs")
-    parser.add_argument('--dataset', type=str, default="Cora")
+    parser.add_argument('--dataset', type=str, default="ddi")
     parser.add_argument('--batch_size', type=int, default=128, help="batch size")
     parser.add_argument('--heuristic', type=str, default="CN")
     parser.add_argument('--gnn', type=str, default="gcn")
@@ -187,12 +187,17 @@ if __name__ == "__main__":
     with open('./yamls/cora/heart_gnn_models.yaml', "r") as f:
         cfg = CfgNode.load_cfg(f)
     cfg_model = eval(f'cfg.model.{args.model}')
-    cfg_model.in_channels = splits['train'].x.shape[1]
+    if not hasattr(splits['train'], 'x') or splits['train'].x is None:
+        cfg_model.in_channels = 1024
+    else:
+        cfg_model.in_channels = splits['train'].x.shape[1]
     cfg_score = eval(f'cfg.score.{args.model}')
     cfg.model.type = args.model
     edge_weight = torch.ones(data.edge_index.size(1), dtype=float)
-    A = ssp.csr_matrix((edge_weight, (data.edge_index[0], data.edge_index[1])),
-                       shape=(data.num_nodes, data.num_nodes))
+    A = ssp.csr_matrix(
+        (edge_weight, (data.edge_index[0].cpu(), data.edge_index[1].cpu())),
+        shape=(data.num_nodes, data.num_nodes)
+    )
     method_dict = {
         "CN": CN,
         "AA": AA,
