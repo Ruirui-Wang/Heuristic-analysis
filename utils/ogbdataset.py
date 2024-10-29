@@ -7,7 +7,7 @@ from torch_geometric.utils import to_undirected, coalesce, remove_self_loops
 import torch_geometric.transforms as T
 
 # random split dataset
-def randomsplit(dataset, val_ratio: float=0.10, test_ratio: float=0.2):
+def randomsplit(dataset, val_ratio: float=0.05, test_ratio: float=0.15):
     data = dataset[0]
     data.edge_index, _ = coalesce(data.edge_index, None, num_nodes=data.num_nodes)
     data.edge_index, _ = remove_self_loops(data.edge_index)

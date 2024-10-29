@@ -11,66 +11,29 @@ import time
 from matplotlib import pyplot as plt
 from yacs.config import CfgNode
 
-from ogbdataset import loaddataset
-from typing import Iterable
-from heuristic import CN, AA, RA
-from gnn import GAT_Variant, GCN_Variant, SAGE_Variant, GIN_Variant, GAE_forall, InnerProduct, mlp_score
+from utils.ogbdataset import loaddataset
+from utils.heuristic import CN, AA, RA
+from models.MLP import MLPPolynomial
 
+class EarlyStopping:
+    def __init__(self, patience=5, verbose=False):
+        self.patience = patience
+        self.verbose = verbose
+        self.counter = 0
+        self.best_loss = float('inf')
+        self.early_stop = False
 
-def create_GAE_model(cfg_model: CN,
-                     cfg_score: CN,
-                     model_name: str):
-    if model_name in {'GAT', 'VGAE', 'GAE', 'GraphSage'}:
-        raise NotImplementedError('Current model does not exist')
-        # model = create_model(cfg_model)
-
-    elif model_name == 'GAT_Variant':
-        encoder = GAT_Variant(cfg_model.in_channels,
-                              cfg_model.hidden_channels,
-                              cfg_model.out_channels,
-                              cfg_model.num_layers,
-                              cfg_model.dropout,
-                              cfg_model.heads,
-                              )
-    elif model_name == 'GCN_Variant':
-        encoder = GCN_Variant(cfg_model.in_channels,
-                              cfg_model.hidden_channels,
-                              cfg_model.out_channels,
-                              cfg_model.num_layers,
-                              cfg_model.dropout,
-                              )
-    elif model_name == 'SAGE_Variant':
-        encoder = SAGE_Variant(cfg_model.in_channels,
-                               cfg_model.hidden_channels,
-                               cfg_model.out_channels,
-                               cfg_model.num_layers,
-                               cfg_model.dropout,
-                               )
-    elif model_name == 'GIN_Variant':
-        encoder = GIN_Variant(cfg_model.in_channels,
-                              cfg_model.hidden_channels,
-                              cfg_model.out_channels,
-                              cfg_model.num_layers,
-                              cfg_model.dropout,
-                              cfg_model.mlp_layer
-                              )
-    if cfg_score.product == 'dot':
-        decoder = mlp_score(cfg_model.out_channels,
-                            cfg_score.score_hidden_channels,
-                            cfg_score.score_out_channels,
-                            cfg_score.score_num_layers,
-                            cfg_score.score_dropout,
-                            cfg_score.product)
-    elif cfg_score.product == 'inner':
-        decoder = InnerProduct()
-
-    else:
-        # Without this else I got: UnboundLocalError: local variable 'model' referenced before assignment
-        raise ValueError('Current model does not exist')
-
-    return GAE_forall(encoder=encoder, decoder=decoder)
-
-def train(model, optimizer, data, splits, device, epoch):
+    def __call__(self, val_loss):
+        if val_loss < self.best_loss:
+            self.best_loss = val_loss
+            self.counter = 0
+        else:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+                if self.verbose:
+                    print("Early stopping triggered!")
+def train(model, optimizer, data, splits, device, A):
     model.train()
     optimizer.zero_grad()
 
@@ -82,12 +45,9 @@ def train(model, optimizer, data, splits, device, epoch):
     pos_edge_label = splits['train']['pos_edge_score'].to(device)
     neg_edge_label = splits['train']['neg_edge_score'].to(device)
 
-    # Forward pass
-    z = model.encode(data.x, data.edge_index)
-
     # Compute predictions for both positive and negative edges
-    pos_pred = model.decode(z[pos_edge_index[0]], z[pos_edge_index[1]])
-    neg_pred = model.decode(z[neg_edge_index[0]], z[neg_edge_index[1]])
+    pos_pred = model(pos_edge_index[0], pos_edge_index[1])
+    neg_pred = model(neg_edge_index[0], neg_edge_index[1])
 
     # Compute regression loss (MSE for continuous labels)
     pos_loss = F.mse_loss(pos_pred, pos_edge_label)
@@ -104,11 +64,10 @@ def train(model, optimizer, data, splits, device, epoch):
 
 
 
-@torch.no_grad()
-def valid(model, data, splits, device, epoch):
+def valid(model, data, splits, device, A):
     model.eval()
 
-    # Positive and negative edges for validation
+    # Positive and negative edges for test
     pos_edge_index = splits['valid']['pos_edge_label_index'].to(device)
     neg_edge_index = splits['valid']['neg_edge_label_index'].to(device)
 
@@ -117,23 +76,17 @@ def valid(model, data, splits, device, epoch):
     neg_edge_label = splits['valid']['neg_edge_score'].to(device)
 
     # Forward pass
-    z = model.encode(data.x, data.edge_index)
-
-    # Predict scores for both positive and negative edges
-    pos_pred = model.decode(z[pos_edge_index[0]], z[pos_edge_index[1]])
-    neg_pred = model.decode(z[neg_edge_index[0]], z[neg_edge_index[1]])
+    pos_pred = model(pos_edge_index[0], pos_edge_index[1])
+    neg_pred = model(neg_edge_index[0], neg_edge_index[1])
 
     # Compute regression loss (MSE)
     pos_loss = F.mse_loss(pos_pred, pos_edge_label)
     neg_loss = F.mse_loss(neg_pred, neg_edge_label)
     loss = pos_loss + neg_loss
 
-
     return loss.item()
-
-
 @torch.no_grad()
-def test(model, data, splits, device):
+def test(model, data, splits, device, A):
     model.eval()
 
     # Positive and negative edges for test
@@ -145,11 +98,8 @@ def test(model, data, splits, device):
     neg_edge_label = splits['test']['neg_edge_score'].to(device)
 
     # Forward pass
-    z = model.encode(data.x, data.edge_index)
-
-    # Predict scores for both positive and negative edges
-    pos_pred = model.decode(z[pos_edge_index[0]], z[pos_edge_index[1]])
-    neg_pred = model.decode(z[neg_edge_index[0]], z[neg_edge_index[1]])
+    pos_pred = model(pos_edge_index[0], pos_edge_index[1])
+    neg_pred = model(neg_edge_index[0], neg_edge_index[1])
     visualize(pos_pred, pos_edge_label, save_path = './visualization_pos.png')
     visualize(neg_pred, neg_edge_label, save_path = './visualization_neg.png')
 
@@ -191,12 +141,11 @@ def visualize(pred, true_label, save_path = './visualization.png'):
 
 def parseargs():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=1000, help="number of epochs")
+    parser.add_argument('--epochs', type=int, default=200, help="number of epochs")
     parser.add_argument('--dataset', type=str, default="Cora")
     parser.add_argument('--batch_size', type=int, default=512, help="batch size")
     parser.add_argument('--heuristic', type=str, default="CN")
-    parser.add_argument('--gnn', type=str, default="gcn")
-    parser.add_argument('--model', type=str, default="GIN_Variant")
+    parser.add_argument('--model', type=str, default="MLP")
     parser.add_argument('--use_feature', type=bool, default=False)
     args = parser.parse_args()
     return args
@@ -207,15 +156,7 @@ if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     data, splits = loaddataset(args.dataset, True)
     data = data.to(device)
-    with open('./yamls/cora/heart_gnn_models.yaml', "r") as f:
-        cfg = CfgNode.load_cfg(f)
-    cfg_model = eval(f'cfg.model.{args.model}')
-    if not hasattr(splits['train'], 'x') or splits['train'].x is None:
-        cfg_model.in_channels = 1024
-    else:
-        cfg_model.in_channels = data.num_nodes
-    cfg_score = eval(f'cfg.score.{args.model}')
-    cfg.model.type = args.model
+    in_channels = data.num_nodes
     edge_weight = torch.ones(data.edge_index.size(1), dtype=float)
     A = ssp.csr_matrix(
         (edge_weight, (data.edge_index[0].cpu(), data.edge_index[1].cpu())),
@@ -234,15 +175,25 @@ if __name__ == "__main__":
         splits[split]['pos_edge_score'] = torch.sigmoid(pos_edge_score)
         splits[split]['neg_edge_score'] = torch.sigmoid(neg_edge_score)
     if not args.use_feature:
-        data.x = torch.eye(data.num_nodes, data.num_nodes).to(device)
+        A_dense = A.toarray()
+        A_tensor = torch.tensor(A_dense)
+        data.x = A_tensor.float().to(device)
 
-    model = create_GAE_model(cfg_model, cfg_score, args.model).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    model = MLPPolynomial(in_channels, hidden_channels=64, num_series=2, A=A).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
+    early_stopping = EarlyStopping(patience=10, verbose=True)
     for epoch in range(1, args.epochs + 1):
         start = time.time()
-        loss = train(model, optimizer, data, splits, device, args.batch_size)
+        loss = train(model, optimizer, data, splits, device, A)
         print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}')
-    test_loss = test(model, data, splits, device)
+        val_loss = valid(model, data, splits, device, A)
+        print(f'Validation Loss: {val_loss:.4f}')
+        early_stopping(val_loss)
+        if early_stopping.early_stop:
+            print("Training stopped early!")
+            break
+    test_loss = test(model, data, splits, device, A)
+    print(f'Test Result: Loss: {test_loss:.4f}')
     save_to_csv(f'./results/test_results_{args.dataset}.csv', args.model, args.heuristic, test_loss)
     print(f'Saved results.')
 
