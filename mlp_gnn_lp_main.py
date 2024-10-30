@@ -78,44 +78,53 @@ def create_GAE_model(cfg_model: CN,
 
     return GAE_forall(encoder=encoder, decoder=decoder)
 
-def train(model, optimizer, data, splits, device, epoch):
+def train(model, optimizer, data, splits, device, batch_size=512):
     model.train()
     optimizer.zero_grad()
 
-    # Positive and negative edges for training
     pos_edge_index = splits['train']['pos_edge_label_index'].to(device)
     neg_edge_index = splits['train']['neg_edge_label_index'].to(device)
-
-    # Labels for positive and negative edges (continuous regression labels)
     pos_edge_label = splits['train']['pos_edge_label'].to(device)
     neg_edge_label = splits['train']['neg_edge_label'].to(device)
 
-    # Forward pass
     z = model.encode(data.x, data.edge_index)
 
-    # Compute predictions for both positive and negative edges
-    pos_pred = model.decode(pos_edge_index[0], pos_edge_index[1], z[pos_edge_index[0]], z[pos_edge_index[1]])
-    neg_pred = model.decode(neg_edge_index[0], neg_edge_index[1], z[pos_edge_index[0]], z[pos_edge_index[1]])
+    pos_preds, neg_preds = [], []
+    pos_labels, neg_labels = [], []
 
-    # Compute regression loss (MSE for continuous labels)
+    for i in range(0, pos_edge_index.size(1), batch_size):
+        pos_batch = pos_edge_index[:, i:i + batch_size]
+        pos_label_batch = pos_edge_label[i:i + batch_size]
+        pos_pred = model.decode(pos_batch[0], pos_batch[1], z[pos_batch[0]], z[pos_batch[1]])
+        pos_preds.append(pos_pred)
+        pos_labels.append(pos_label_batch)
+
+    for i in range(0, neg_edge_index.size(1), batch_size):
+        neg_batch = neg_edge_index[:, i:i + batch_size]
+        neg_label_batch = neg_edge_label[i:i + batch_size]
+        neg_pred = model.decode(neg_batch[0], neg_batch[1], z[neg_batch[0]], z[neg_batch[1]])
+        neg_preds.append(neg_pred)
+        neg_labels.append(neg_label_batch)
+
+    pos_pred = torch.cat(pos_preds, dim=0)
+    neg_pred = torch.cat(neg_preds, dim=0)
+    pos_edge_label = torch.cat(pos_labels, dim=0)
+    neg_edge_label = torch.cat(neg_labels, dim=0)
+
     pos_loss = F.mse_loss(pos_pred, pos_edge_label)
     neg_loss = F.mse_loss(neg_pred, neg_edge_label)
     loss = pos_loss + neg_loss
     loss.backward()
+    optimizer.step()
 
     all_preds = torch.cat([pos_pred, neg_pred], dim=0)
     all_labels = torch.cat([torch.ones(pos_pred.size(0)), torch.zeros(neg_pred.size(0))], dim=0).to(device)
-
-    # Compute AUC
     auc = roc_auc_score(all_labels.cpu().detach().numpy(), all_preds.cpu().detach().numpy())
 
-    # Optimizer step
-    optimizer.step()
     visualize(pos_pred, pos_edge_label, save_path='./visualization_pos_train.png')
     visualize(neg_pred, neg_edge_label, save_path='./visualization_neg_train.png')
 
     return auc
-
 
 
 @torch.no_grad()
@@ -251,7 +260,7 @@ if __name__ == "__main__":
     early_stopping = EarlyStopping(patience=20, verbose=True)
     for epoch in range(1, args.epochs + 1):
         start = time.time()
-        auc = train(model, optimizer, data, splits, device, A)
+        auc = train(model, optimizer, data, splits, device, batch_size=args.batch_size)
         print(f'Epoch: {epoch:03d}, AUC: {auc:.4f}')
         val_auc = valid(model, data, splits, device, A)
         print(f'Validation AUC: {val_auc:.4f}')

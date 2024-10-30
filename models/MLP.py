@@ -1,49 +1,6 @@
 import torch
 import torch.nn as nn
 
-'''class MLPPolynomial(nn.Module):
-    def __init__(self, input_size, hidden_channels, num_series, A, nonlinearity=nn.ReLU, dropout=0.5):
-        super(MLPPolynomial, self).__init__()
-        self.hidden_channels = hidden_channels
-        self.num_series = num_series
-        self.dropout = dropout
-        # Define three separate linear layers
-        self.fc1 = nn.Linear(input_size * 2 * num_series, hidden_channels)
-        self.fc2 = nn.Linear(hidden_channels, hidden_channels)
-        self.fc3 = nn.Linear(hidden_channels, 1)  # Final layer outputs a single value
-
-        # Activation functions
-        self.activation1 = nonlinearity()
-        self.activation2 = nonlinearity()
-        A = torch.tensor(A.toarray(), dtype=torch.float32)
-
-        self.A_powers = [A]  # A^1
-        for n in range(1, num_series):
-            self.A_powers.append(torch.matmul(self.A_powers[-1], A))  # A^n
-        self.dropout_layer = nn.Dropout(p=self.dropout)
-
-    def forward(self, i, j):
-        assert torch.all((i >= 0) & (i < self.A_powers[0].shape[0])), "Index i is out of bounds."
-        assert torch.all((j >= 0) & (j < self.A_powers[0].shape[0])), "Index j is out of bounds."
-
-        A_i_powers = torch.stack([A_n[i] for A_n in self.A_powers], dim=1)
-        A_j_powers = torch.stack([A_n[j] for A_n in self.A_powers], dim=1)
-        A_combined = torch.cat((A_i_powers, A_j_powers), dim=1)
-        A_combined = A_combined.view(A_combined.shape[0], -1)
-
-        output = self.fc1(A_combined)
-        output = self.activation1(output)
-        output = self.dropout_layer(output)
-
-        output = self.fc2(output)
-        output = self.activation2(output)
-        output = self.dropout_layer(output)
-
-        output = self.fc3(output)
-        output = torch.sigmoid(output)
-        return output.view(-1)
-'''
-
 
 class MLPPolynomial(nn.Module):
     def __init__(self, input_size, hidden_channels, num_series, A, nonlinearity=nn.ReLU, dropout=0.5):
@@ -72,6 +29,9 @@ class MLPPolynomial(nn.Module):
         assert torch.all((j >= 0) & (j < self.A_powers[0].shape[0])), "Index j is out of bounds."
 
         # Perform element-wise multiplication without summing
+        device = next(self.parameters()).device
+        self.A_powers = [A_n.to(device) for A_n in self.A_powers]
+        i, j = i.to(device), j.to(device)
         dot_products = [A_n[i] * A_n[j] for A_n in self.A_powers]
 
         # Concatenate along the series dimension
@@ -91,49 +51,6 @@ class MLPPolynomial(nn.Module):
         return output.view(-1)
 
 
-'''class MLPPolynomialFeatures(nn.Module):
-    def __init__(self, input_size, feature_size, hidden_channels, num_series, A, nonlinearity=nn.ReLU, dropout=0.5):
-        super(MLPPolynomialFeatures, self).__init__()
-        self.hidden_channels = hidden_channels
-        self.num_series = num_series
-        self.dropout = dropout
-        # Define three separate linear layers
-        self.fc1 = nn.Linear(input_size * 2 * num_series + feature_size*2, hidden_channels)
-        self.fc2 = nn.Linear(hidden_channels, hidden_channels)
-        self.fc3 = nn.Linear(hidden_channels, 1)  # Final layer outputs a single value
-
-        # Activation functions
-        self.activation1 = nonlinearity()
-        self.activation2 = nonlinearity()
-        A = torch.tensor(A.toarray(), dtype=torch.float32)
-
-        self.A_powers = [A]  # A^1
-        for n in range(1, num_series):
-            self.A_powers.append(torch.matmul(self.A_powers[-1], A))  # A^n
-        self.dropout_layer = nn.Dropout(p=self.dropout)
-
-    def forward(self, i, j, features_i, features_j):
-        assert torch.all((i >= 0) & (i < self.A_powers[0].shape[0])), "Index i is out of bounds."
-        assert torch.all((j >= 0) & (j < self.A_powers[0].shape[0])), "Index j is out of bounds."
-
-        A_i_powers = torch.stack([A_n[i] for A_n in self.A_powers], dim=1)
-        A_j_powers = torch.stack([A_n[j] for A_n in self.A_powers], dim=1)
-        A_combined = torch.cat((A_i_powers, A_j_powers), dim=1)
-        A_combined = A_combined.view(A_combined.shape[0], -1)
-        combined_features = torch.cat((features_i, features_j), dim=1)
-        combined_input = torch.cat((A_combined, combined_features), dim=1)
-
-        output = self.fc1(combined_input)
-        output = self.activation1(output)
-        output = self.dropout_layer(output)
-
-        output = self.fc2(output)
-        output = self.activation2(output)
-        output = self.dropout_layer(output)
-
-        output = self.fc3(output)
-        output = torch.sigmoid(output)
-        return output.view(-1)'''
 
 class MLPPolynomialFeatures(nn.Module):
     def __init__(self, input_size, feature_size, hidden_channels, num_series, A, nonlinearity=nn.ReLU, dropout=0.5):
@@ -162,6 +79,9 @@ class MLPPolynomialFeatures(nn.Module):
         assert torch.all((j >= 0) & (j < self.A_powers[0].shape[0])), "Index j is out of bounds."
 
         # Perform element-wise multiplication for each power of A
+        device = next(self.parameters()).device
+        self.A_powers = [A_n.to(device) for A_n in self.A_powers]
+        i, j = i.to(device), j.to(device)
         dot_products_A = [A_n[i] * A_n[j] for A_n in self.A_powers]
         A_combined = torch.cat(dot_products_A, dim=1)  # Concatenate along series dimension
 
@@ -186,104 +106,6 @@ class MLPPolynomialFeatures(nn.Module):
 
 
 
-
-'''class MLPPolynomialFeatures(nn.Module):
-    def __init__(self, input_size, feature_size, hidden_channels, num_series, A, nonlinearity=nn.ReLU, dropout=0.5):
-        super(MLPPolynomialFeatures, self).__init__()
-        self.hidden_channels = hidden_channels
-        self.num_series = num_series
-        self.dropout = dropout
-
-        # Define two hidden layers
-        self.fc1 = nn.Linear(input_size * num_series, hidden_channels)
-        self.fc2 = nn.Linear(hidden_channels, hidden_channels)
-
-        # Final layer that combines features and hidden layer output
-        self.fc3 = nn.Linear(hidden_channels + feature_size, 1)
-
-        # Activation functions
-        self.activation1 = nonlinearity()
-        self.activation2 = nonlinearity()
-
-        # Precompute powers of adjacency matrix A
-        A = torch.tensor(A.toarray(), dtype=torch.float32)
-        self.A_powers = [A]  # A^1
-        for n in range(1, num_series):
-            self.A_powers.append(torch.matmul(self.A_powers[-1], A))  # A^n
-
-        # Dropout layer
-        self.dropout_layer = nn.Dropout(p=self.dropout)
-
-    def forward(self, i, j, features_i, features_j):
-        assert torch.all((i >= 0) & (i < self.A_powers[0].shape[0])), "Index i is out of bounds."
-        assert torch.all((j >= 0) & (j < self.A_powers[0].shape[0])), "Index j is out of bounds."
-
-        # Compute element-wise multiplication for each power of A
-        dot_products_A = [A_n[i] * A_n[j] for A_n in self.A_powers]
-        A_combined = torch.cat(dot_products_A, dim=1)  # Concatenate along series dimension
-
-        # Initial hidden layers
-        output = self.fc1(A_combined)
-        output = self.activation1(output)
-        output = self.dropout_layer(output)
-
-        output = self.fc2(output)
-        output = self.activation2(output)
-        output = self.dropout_layer(output)
-
-        # Combine hidden output with features before the final layer
-        features_combined = features_i * features_j
-        combined_input = torch.cat((output, features_combined), dim=1)
-
-        # Final output layer
-        output = self.fc3(combined_input)
-        output = torch.sigmoid(output)
-
-        return output.view(-1)
-'''
-
-'''class MLPPolynomialLP(nn.Module):
-    def __init__(self, input_size, hidden_channels, num_series, A, nonlinearity=nn.ReLU, dropout=0.5):
-        super(MLPPolynomialLP, self).__init__()
-        self.hidden_channels = hidden_channels
-        self.num_series = num_series
-        self.dropout = dropout
-        # Define three separate linear layers
-        self.fc1 = nn.Linear(input_size * 2 * num_series, hidden_channels)
-        self.fc2 = nn.Linear(hidden_channels, hidden_channels)
-        self.fc3 = nn.Linear(hidden_channels, 1)  # Final layer outputs a single value
-
-        # Activation functions
-        self.activation1 = nonlinearity()
-        self.activation2 = nonlinearity()
-        A = torch.tensor(A.toarray(), dtype=torch.float32)
-
-        self.A_powers = [A]  # A^1
-        for n in range(1, num_series):
-            self.A_powers.append(torch.matmul(self.A_powers[-1], A))  # A^n
-        self.dropout_layer = nn.Dropout(p=self.dropout)
-
-    def forward(self, i, j):
-        assert torch.all((i >= 0) & (i < self.A_powers[0].shape[0])), "Index i is out of bounds."
-        assert torch.all((j >= 0) & (j < self.A_powers[0].shape[0])), "Index j is out of bounds."
-
-        A_i_powers = torch.stack([A_n[i] for A_n in self.A_powers], dim=1)
-        A_j_powers = torch.stack([A_n[j] for A_n in self.A_powers], dim=1)
-        A_combined = torch.cat((A_i_powers, A_j_powers), dim=1)
-        A_combined = A_combined.view(A_combined.shape[0], -1)
-
-        output = self.fc1(A_combined)
-        output = self.activation1(output)
-        output = self.dropout_layer(output)
-
-        output = self.fc2(output)
-        output = self.activation2(output)
-        output = self.dropout_layer(output)
-
-        output = self.fc3(output)
-        output = torch.sigmoid(output)
-        return output.view(-1)
-'''
 
 
 class MLPPolynomialLP(nn.Module):

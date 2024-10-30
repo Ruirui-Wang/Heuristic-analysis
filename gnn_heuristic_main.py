@@ -190,7 +190,7 @@ def visualize(pred, true_label, save_path = './visualization.png'):
 
 def parseargs():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=1000, help="number of epochs")
+    parser.add_argument('--epochs', type=int, default=30, help="number of epochs")
     parser.add_argument('--dataset', type=str, default="Cora")
     parser.add_argument('--batch_size', type=int, default=512, help="batch size")
     parser.add_argument('--heuristic', type=str, default="CN")

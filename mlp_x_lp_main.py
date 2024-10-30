@@ -33,34 +33,41 @@ class EarlyStopping:
                 self.early_stop = True
                 if self.verbose:
                     print("Early stopping triggered!")
-def train(model, optimizer, data, splits, device, A):
+def train(model, optimizer, data, splits, device, A, batch_size=512):
     model.train()
     optimizer.zero_grad()
-
-    # Positive and negative edges for training
     pos_edge_index = splits['train']['pos_edge_label_index'].to(device)
     neg_edge_index = splits['train']['neg_edge_label_index'].to(device)
-
-    # Labels for positive and negative edges (continuous regression labels)
     pos_edge_label = splits['train']['pos_edge_label'].to(device)
     neg_edge_label = splits['train']['neg_edge_label'].to(device)
 
-    # Compute predictions for both positive and negative edges
-    pos_pred = model(pos_edge_index[0], pos_edge_index[1], data.x[pos_edge_index[0], :], data.x[pos_edge_index[1], :])
-    neg_pred = model(neg_edge_index[0], neg_edge_index[1], data.x[neg_edge_index[0], :], data.x[neg_edge_index[1], :])
+    total_loss = 0
+    pos_preds, neg_preds = [], []
 
-    pos_loss = -torch.log(pos_pred + 1e-15).mean()
-    neg_loss = -torch.log(1 - neg_pred + 1e-15).mean()
-    loss = pos_loss + neg_loss
-    loss.backward()
+    for i in range(0, pos_edge_index.size(1), batch_size):
+        batch_pos_edge_index = pos_edge_index[:, i:i+batch_size]
+        batch_pos_pred = model(batch_pos_edge_index[0], batch_pos_edge_index[1],
+                               data.x[batch_pos_edge_index[0]], data.x[batch_pos_edge_index[1]])
+        pos_preds.append(batch_pos_pred)
+        batch_pos_loss = -torch.log(batch_pos_pred + 1e-15).mean()
+        total_loss += batch_pos_loss
+
+    for i in range(0, neg_edge_index.size(1), batch_size):
+        batch_neg_edge_index = neg_edge_index[:, i:i+batch_size]
+        batch_neg_pred = model(batch_neg_edge_index[0], batch_neg_edge_index[1],
+                               data.x[batch_neg_edge_index[0]], data.x[batch_neg_edge_index[1]])
+        neg_preds.append(batch_neg_pred)
+        batch_neg_loss = -torch.log(1 - batch_neg_pred + 1e-15).mean()
+        total_loss += batch_neg_loss
+
+    total_loss.backward()
+    optimizer.step()
+
+    pos_pred = torch.cat(pos_preds, dim=0)
+    neg_pred = torch.cat(neg_preds, dim=0)
     all_preds = torch.cat([pos_pred, neg_pred], dim=0)
     all_labels = torch.cat([torch.ones(pos_pred.size(0)), torch.zeros(neg_pred.size(0))], dim=0).to(device)
-
-    # Compute AUC
     auc = roc_auc_score(all_labels.cpu().detach().numpy(), all_preds.cpu().detach().numpy())
-
-    # Optimizer step
-    optimizer.step()
 
     return auc
 
@@ -171,7 +178,7 @@ if __name__ == "__main__":
     early_stopping = EarlyStopping(patience=20, verbose=True)
     for epoch in range(1, args.epochs + 1):
         start = time.time()
-        auc = train(model, optimizer, data, splits, device, A)
+        auc = train(model, optimizer, data, splits, device, A, batch_size=args.batch_size)
         print(f'Epoch: {epoch:03d}, AUC: {auc:.4f}')
         val_auc = valid(model, data, splits, device, A)
         print(f'Validation AUC: {val_auc:.4f}')
